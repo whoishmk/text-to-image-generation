@@ -6,7 +6,7 @@ model:
   model_type: "sdxl"  # Options: sdxl, sd2.1, sd1.5
   lora_rank: 16
   lora_alpha: 32
-  target_modules: ["q_proj", "v_proj", "k_proj", "out_proj"]
+  target_modules: ["to_q", "to_k", "to_v", "to_out.0"]
   lora_dropout: 0.1
 
 # Training Configuration
@@ -56,7 +56,7 @@ lora:
     rank: 16
     alpha: 32
     dropout: 0.1
-    target_modules: ["q_proj", "v_proj", "k_proj", "out_proj"]
+    target_modules: ["to_q", "to_k", "to_v", "to_out.0"]
   
   # Text Encoder LoRA settings (optional)
   text_encoder_lora:
