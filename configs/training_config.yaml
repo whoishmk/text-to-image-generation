@@ -1,0 +1,186 @@
+# Training Configuration for Text-to-Image Generation with LoRA Fine-tuning
+
+# Model Configuration
+model:
+  base_model: "stabilityai/stable-diffusion-xl-base-1.0"
+  model_type: "sdxl"  # Options: sdxl, sd2.1, sd1.5
+  lora_rank: 16
+  lora_alpha: 32
+  target_modules: ["q_proj", "v_proj", "k_proj", "out_proj"]
+  lora_dropout: 0.1
+
+# Training Configuration
+training:
+  learning_rate: 1e-4
+  batch_size: 4
+  num_epochs: 100
+  gradient_accumulation_steps: 4
+  warmup_steps: 500
+  weight_decay: 0.01
+  eps: 1e-8
+  mixed_precision: "fp16"  # Options: fp16, bf16, no
+  log_steps: 10
+  save_steps: 500
+  eval_steps: 100
+  seed: 42
+  output_dir: "./outputs"
+  log_with: "tensorboard"  # Options: tensorboard, wandb, mlflow
+  optimizer: "adamw"  # Options: adamw, adam
+  scheduler: "cosine"  # Options: cosine, linear, constant
+  gradient_clip_norm: 1.0
+  max_grad_norm: 1.0
+
+# Data Configuration
+data:
+  train_data_dir: "./data/train"
+  validation_data_dir: "./data/val"
+  resolution: 1024
+  max_length: 77
+  num_workers: 4
+  center_crop: true
+  random_flip: true
+  image_extensions: [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"]
+
+# Hardware Configuration
+hardware:
+  device: "cuda"  # Options: cuda, cpu, mps
+  num_gpus: 1
+  memory_efficient_attention: true
+  compile_model: true  # PyTorch 2.0+ model compilation
+  enable_xformers: true
+
+# LoRA Specific Configuration
+lora:
+  # UNet LoRA settings
+  unet_lora:
+    rank: 16
+    alpha: 32
+    dropout: 0.1
+    target_modules: ["q_proj", "v_proj", "k_proj", "out_proj"]
+  
+  # Text Encoder LoRA settings (optional)
+  text_encoder_lora:
+    enabled: false
+    rank: 8
+    alpha: 16
+    dropout: 0.1
+    target_modules: ["q_proj", "v_proj", "k_proj", "out_proj"]
+  
+  # VAE LoRA settings (optional)
+  vae_lora:
+    enabled: false
+    rank: 4
+    alpha: 8
+    dropout: 0.1
+
+# Validation and Evaluation
+evaluation:
+  # Evaluation prompts for generating sample images
+  eval_prompts:
+    - "a beautiful landscape with mountains and lake, high quality, detailed"
+    - "a cute cat sitting on a windowsill, photorealistic, detailed"
+    - "a futuristic city skyline at night, cinematic lighting, detailed"
+    - "a peaceful forest scene with sunlight filtering through trees, detailed"
+    - "a vintage car on a country road, golden hour, detailed"
+  
+  # Evaluation settings
+  num_eval_images: 5
+  eval_resolution: 1024
+  guidance_scale: 7.5
+  num_inference_steps: 50
+  seed: 42
+
+# Logging and Monitoring
+logging:
+  level: "INFO"
+  save_images: true
+  save_metadata: true
+  log_gradients: false
+  log_parameters: true
+  log_learning_rate: true
+  log_loss: true
+  log_validation: true
+
+# Checkpointing
+checkpointing:
+  save_strategy: "steps"  # Options: steps, epoch, no
+  save_total_limit: 3
+  save_best_model: true
+  metric_for_best_model: "loss"
+  greater_is_better: false
+  load_best_model_at_end: true
+
+# Advanced Training Options
+advanced:
+  # Gradient checkpointing for memory efficiency
+  gradient_checkpointing: false
+  
+  # Mixed precision training
+  fp16_full_eval: false
+  
+  # Data loading
+  dataloader_pin_memory: true
+  dataloader_drop_last: true
+  
+  # Model saving
+  save_safetensors: true
+  save_optimizer: true
+  save_scheduler: true
+  
+  # Resume training
+  resume_from_checkpoint: null
+  
+  # Early stopping
+  early_stopping_patience: 10
+  early_stopping_threshold: 0.001
+
+# Cloud Deployment Settings
+deployment:
+  # Docker settings
+  docker:
+    base_image: "pytorch/pytorch:2.0.1-cuda11.8-cudnn8-runtime"
+    requirements_file: "requirements.txt"
+    port: 8000
+  
+  # Kubernetes settings
+  kubernetes:
+    replicas: 3
+    resources:
+      requests:
+        memory: "8Gi"
+        cpu: "4"
+        nvidia.com/gpu: "1"
+      limits:
+        memory: "16Gi"
+        cpu: "8"
+        nvidia.com/gpu: "1"
+  
+  # AWS settings
+  aws:
+    instance_type: "g4dn.xlarge"
+    region: "us-west-2"
+    ami: "ami-0c7217cdde317cfec"  # Deep Learning AMI
+  
+  # Google Cloud settings
+  gcp:
+    machine_type: "n1-standard-4"
+    zone: "us-central1-a"
+    accelerator_type: "NVIDIA_TESLA_T4"
+    accelerator_count: 1
+  
+  # Azure settings
+  azure:
+    vm_size: "Standard_NC4as_T4_v3"
+    location: "eastus"
+    image_offer: "UbuntuServer"
+    image_sku: "18.04-LTS"
+
+# Environment Variables
+environment:
+  CUDA_VISIBLE_DEVICES: "0"
+  TOKENIZERS_PARALLELISM: "false"
+  PYTORCH_CUDA_ALLOC_CONF: "max_split_size_mb:128"
+  HF_HUB_OFFLINE: "false"
+  HF_HUB_CACHE: "./cache"
+  TRANSFORMERS_CACHE: "./cache"
+  HF_DATASETS_CACHE: "./cache"
