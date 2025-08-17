@@ -56,6 +56,15 @@ def load_lora_model(base_model_id: str, lora_path: str, device: torch.device):
     logger.info(f"Loading LoRA weights from: {lora_path}")
     pipeline.unet = PeftModel.from_pretrained(pipeline.unet, lora_path)
     
+    # Fix PEFT wrapper issue by setting the forward method
+    def fixed_forward(*args, **kwargs):
+        # Remove input_ids if present (PEFT wrapper issue)
+        if 'input_ids' in kwargs:
+            del kwargs['input_ids']
+        return pipeline.unet.base_model.forward(*args, **kwargs)
+    
+    pipeline.unet.forward = fixed_forward
+    
     # Enable memory efficient attention if available
     if hasattr(torch.backends, "cuda") and torch.backends.cuda.is_built():
         torch.backends.cuda.enable_mem_efficient_sdp(True)

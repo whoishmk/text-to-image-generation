@@ -107,10 +107,11 @@ def main():
         height = config["data"]["resolution"]
         width = config["data"]["resolution"]
         
-        # Create dummy inputs
+        # Create dummy inputs - use consistent sequence length
+        seq_length = 77  # Standard CLIP sequence length
         dummy_image = torch.randn(batch_size, 3, height, width, device=device)
-        dummy_text = torch.randint(0, 1000, (batch_size, config["data"]["max_length"]), device=device)
-        dummy_attention = torch.ones(batch_size, config["data"]["max_length"], device=device)
+        dummy_text = torch.randint(0, 1000, (batch_size, seq_length), device=device)
+        dummy_attention = torch.ones(batch_size, seq_length, device=device)
         
         # Test forward pass
         logger.info("Testing forward pass...")
@@ -119,16 +120,46 @@ def main():
             text_embeddings = pipeline.text_encoder(dummy_text, attention_mask=dummy_attention)[0]
             text_embeddings_2 = pipeline.text_encoder_2(dummy_text, attention_mask=dummy_attention)[0]
             
+            # Debug tensor shapes
+            logger.info(f"Text embeddings 1 shape: {text_embeddings.shape}")
+            logger.info(f"Text embeddings 2 shape: {text_embeddings_2.shape}")
+            
             # Encode image to latents
             latents = pipeline.vae.encode(dummy_image).latent_dist.sample()
             latents = latents * pipeline.vae.config.scaling_factor
             
-            # Test UNet forward pass
-            noise_pred = pipeline.unet(
+            # Test UNet forward pass - call the base model directly
+            # For SDXL, we need to concatenate the text embeddings
+            # Ensure both have the same dimensions and batch size
+            if text_embeddings_2.dim() == 2:
+                text_embeddings_2 = text_embeddings_2.unsqueeze(0)
+            
+            # Ensure both have the same batch size and sequence length
+            # text_embeddings: [1, 77, 768], text_embeddings_2: [1, 1280]
+            # We need to expand text_embeddings_2 to match the sequence length
+            if text_embeddings_2.dim() == 2:
+                # Expand to match sequence length: [1, 1280] -> [1, 77, 1280]
+                text_embeddings_2 = text_embeddings_2.unsqueeze(1).expand(-1, text_embeddings.shape[1], -1)
+            elif text_embeddings_2.shape[1] != text_embeddings.shape[1]:
+                # If sequence lengths don't match, expand the shorter one
+                if text_embeddings_2.shape[1] == 1:
+                    text_embeddings_2 = text_embeddings_2.expand(-1, text_embeddings.shape[1], -1)
+                else:
+                    text_embeddings = text_embeddings.expand(-1, text_embeddings_2.shape[1], -1)
+            
+            # Debug shapes after expansion
+            logger.info(f"After expansion - Text embeddings 1 shape: {text_embeddings.shape}")
+            logger.info(f"After expansion - Text embeddings 2 shape: {text_embeddings_2.shape}")
+            
+            combined_embeddings = torch.cat([text_embeddings, text_embeddings_2], dim=-1)
+            noise_pred = pipeline.unet.model(
                 latents,
                 torch.tensor([500], device=device),  # Timestep
-                encoder_hidden_states=text_embeddings,
-                encoder_hidden_states_2=text_embeddings_2
+                encoder_hidden_states=combined_embeddings,
+                added_cond_kwargs={
+                    "text_embeds": text_embeddings_2.mean(dim=1),  # [1, 77, 1280] -> [1, 1280] (average across sequence)
+                    "time_ids": torch.zeros(1, 6, device=device)  # SDXL time embeddings
+                }
             ).sample
             
             logger.info(f"UNet output shape: {noise_pred.shape}")
