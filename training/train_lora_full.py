@@ -109,9 +109,9 @@ def create_dataloader(dataset, batch_size: int, num_workers: int = 0):
         drop_last=True
     )
 
-def train_epoch(model, dataloader, optimizer, scheduler, device, epoch: int, config: Dict[str, Any]):
+def train_epoch(pipeline, dataloader, optimizer, scheduler, device, epoch: int, config: Dict[str, Any]):
     """Train for one epoch."""
-    model.train()
+    pipeline.unet.train()  # Only train the UNet
     total_loss = 0.0
     
     progress_bar = tqdm(dataloader, desc=f"Epoch {epoch}")
@@ -127,28 +127,40 @@ def train_epoch(model, dataloader, optimizer, scheduler, device, epoch: int, con
         
         # Get text embeddings
         with torch.no_grad():
-            text_embeddings = model.text_encoder(input_ids, attention_mask=attention_mask)[0]
-            text_embeddings_2 = model.text_encoder_2(input_ids, attention_mask=attention_mask)[0]
+            text_embeddings = pipeline.text_encoder(input_ids, attention_mask=attention_mask)[0]
+            text_embeddings_2 = pipeline.text_encoder_2(input_ids, attention_mask=attention_mask)[0]
         
         # Sample noise
         batch_size = pixel_values.shape[0]
-        latents = model.vae.encode(pixel_values).latent_dist.sample()
-        latents = latents * model.vae.config.scaling_factor
+        latents = pipeline.vae.encode(pixel_values).latent_dist.sample()
+        latents = latents * pipeline.vae.config.scaling_factor
         
         # Sample random timesteps
-        timesteps = torch.randint(0, model.noise_scheduler.config.num_train_timesteps, (batch_size,), device=device)
+        timesteps = torch.randint(0, pipeline.scheduler.config.num_train_timesteps, (batch_size,), device=device)
         timesteps = timesteps.long()
         
         # Add noise to latents
         noise = torch.randn_like(latents)
-        noisy_latents = model.noise_scheduler.add_noise(latents, noise, timesteps)
+        noisy_latents = pipeline.scheduler.add_noise(latents, noise, timesteps)
         
         # Predict noise
-        noise_pred = model.unet(
+        # Ensure both text embeddings have the same dimensions
+        if text_embeddings_2.dim() == 2:
+            # Expand to match sequence length: [batch, 1280] -> [batch, seq_len, 1280]
+            text_embeddings_2 = text_embeddings_2.unsqueeze(1).expand(-1, text_embeddings.shape[1], -1)
+        
+        combined_embeddings = torch.cat([text_embeddings, text_embeddings_2], dim=-1)
+        
+        # Call the base model directly to avoid PEFT wrapper issues
+        # For SDXL, we need to provide added_cond_kwargs
+        noise_pred = pipeline.unet.base_model(
             noisy_latents,
             timesteps,
-            encoder_hidden_states=text_embeddings,
-            encoder_hidden_states_2=text_embeddings_2
+            encoder_hidden_states=combined_embeddings,
+            added_cond_kwargs={
+                "text_embeds": text_embeddings_2.mean(dim=1),  # Average across sequence
+                "time_ids": torch.zeros(noisy_latents.shape[0], 6, device=device)  # SDXL time embeddings
+            }
         ).sample
         
         # Calculate loss
@@ -159,7 +171,7 @@ def train_epoch(model, dataloader, optimizer, scheduler, device, epoch: int, con
         
         # Gradient clipping
         if config["training"]["gradient_clip_norm"] > 0:
-            torch.nn.utils.clip_grad_norm_(model.unet.parameters(), config["training"]["gradient_clip_norm"])
+            torch.nn.utils.clip_grad_norm_(pipeline.unet.parameters(), config["training"]["gradient_clip_norm"])
         
         optimizer.step()
         scheduler.step()
@@ -179,13 +191,13 @@ def train_epoch(model, dataloader, optimizer, scheduler, device, epoch: int, con
     
     return total_loss / len(dataloader)
 
-def save_checkpoint(model, optimizer, scheduler, epoch: int, loss: float, output_dir: Path):
+def save_checkpoint(pipeline, optimizer, scheduler, epoch: int, loss: float, output_dir: Path):
     """Save training checkpoint."""
     checkpoint_dir = output_dir / f"checkpoint-{epoch}"
     checkpoint_dir.mkdir(exist_ok=True)
     
     # Save LoRA weights
-    model.unet.save_pretrained(str(checkpoint_dir / "lora_weights"))
+    pipeline.unet.save_pretrained(str(checkpoint_dir / "lora_weights"))
     
     # Save optimizer and scheduler
     torch.save({
@@ -301,12 +313,20 @@ def main():
         
         # Setup optimizer
         logger.info("Setting up optimizer...")
+        
+        # Ensure numeric values are properly typed
+        lr = float(config["training"]["learning_rate"])
+        weight_decay = float(config["training"]["weight_decay"])
+        eps = float(config["training"]["eps"])
+        
+        logger.info(f"Learning rate: {lr}, Weight decay: {weight_decay}, Eps: {eps}")
+        
         optimizer = torch.optim.AdamW(
             pipeline.unet.parameters(),
-            lr=config["training"]["learning_rate"],
+            lr=lr,
             betas=(0.9, 0.999),
-            weight_decay=config["training"]["weight_decay"],
-            eps=config["training"]["eps"]
+            weight_decay=weight_decay,
+            eps=eps
         )
         
         # Setup scheduler
@@ -315,7 +335,7 @@ def main():
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
             T_max=total_steps,
-            eta_min=config["training"]["learning_rate"] * 0.1
+            eta_min=lr * 0.1
         )
         
         # Training loop

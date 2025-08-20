@@ -30,7 +30,11 @@ text-to-image-generation/
 └── organize_data.py            # Data organization
 ```
 
-## 🛠️ Technology Stack
+## �️ Model Hosting Location
+
+The model is hosted on Hugging Face: [https://huggingface.co/whoishmk/texttoimage](https://huggingface.co/whoishmk/texttoimage)
+
+## �🛠️ Technology Stack
 
 - **AI Models**: Stable Diffusion XL, PEFT
 - **Framework**: PyTorch, Diffusers, Transformers

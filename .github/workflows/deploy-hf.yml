@@ -36,3 +36,4 @@ jobs:
         space-type: gradio
         space-sdk: gradio
         space-hardware: cpu-basic
+

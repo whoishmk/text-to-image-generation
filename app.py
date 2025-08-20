@@ -342,7 +342,7 @@ with gr.Blocks(
     
     # Update download button when image is generated
     output_image.change(
-        fn=lambda img: gr.File.update(value=img) if img else None,
+        fn=lambda img: gr.File(value=img) if img else None,
         inputs=output_image,
         outputs=download_btn
     )
@@ -355,3 +355,4 @@ if __name__ == "__main__":
         share=True,
         show_error=True
     )
+
